@@ -1,44 +1,77 @@
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { TrendingDown, AlertTriangle, ArrowRight } from 'lucide-react';
+import { TrendingDown, AlertTriangle, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { popularStocks, europeanStocks } from '@/lib/mockData';
+import { useStocks } from '@/hooks/useStocks';
 import { cn } from '@/lib/utils';
 
 const DipFinder = () => {
-  const allStocks = useMemo(() => [...popularStocks, ...europeanStocks], []);
+  const { data: allStocks, isLoading, error } = useStocks();
 
   const dips = useMemo(() => {
-    return allStocks
+    if (!allStocks) return [];
+    
+    const validStocks = allStocks.filter(s => s.price > 0);
+    
+    return validStocks
       .map(stock => {
         const reasons: string[] = [];
         
-        if (stock.price < stock.movingAverage200) {
+        if (stock.movingAverage200 > 0 && stock.price < stock.movingAverage200) {
           const percentBelow = ((stock.movingAverage200 - stock.price) / stock.movingAverage200) * 100;
           reasons.push(`${percentBelow.toFixed(1)}% below 200-day MA`);
         }
         
-        const dropFrom52WH = ((stock.fiftyTwoWeekHigh - stock.price) / stock.fiftyTwoWeekHigh) * 100;
-        if (dropFrom52WH > 10) {
-          reasons.push(`${dropFrom52WH.toFixed(1)}% below 52W high`);
+        if (stock.fiftyTwoWeekHigh > 0) {
+          const dropFrom52WH = ((stock.fiftyTwoWeekHigh - stock.price) / stock.fiftyTwoWeekHigh) * 100;
+          if (dropFrom52WH > 10) {
+            reasons.push(`${dropFrom52WH.toFixed(1)}% below 52W high`);
+          }
         }
         
         if (stock.changePercent < -3) {
           reasons.push(`Down ${Math.abs(stock.changePercent).toFixed(1)}% today`);
         }
         
+        const dropFrom52WH = stock.fiftyTwoWeekHigh > 0 
+          ? ((stock.fiftyTwoWeekHigh - stock.price) / stock.fiftyTwoWeekHigh) * 100 
+          : 0;
+        
         return {
           stock,
           reasons,
           severity: reasons.length >= 2 ? 'high' : reasons.length === 1 ? 'medium' : 'low',
-          score: dropFrom52WH + (stock.price < stock.movingAverage200 ? 20 : 0),
+          score: dropFrom52WH + (stock.movingAverage200 > 0 && stock.price < stock.movingAverage200 ? 20 : 0),
         };
       })
       .filter(d => d.reasons.length > 0)
       .sort((a, b) => b.score - a.score);
   }, [allStocks]);
+
+  if (isLoading) {
+    return (
+      <MainLayout>
+        <div className="flex flex-col items-center justify-center py-24">
+          <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
+          <p className="text-muted-foreground">Scanning for dips...</p>
+        </div>
+      </MainLayout>
+    );
+  }
+
+  if (error) {
+    return (
+      <MainLayout>
+        <div className="flex flex-col items-center justify-center py-24">
+          <AlertCircle className="h-8 w-8 text-destructive mb-4" />
+          <h2 className="text-xl font-semibold text-foreground">Failed to load stock data</h2>
+          <p className="text-muted-foreground mt-2">Please try again later</p>
+        </div>
+      </MainLayout>
+    );
+  }
 
   return (
     <MainLayout>
@@ -50,7 +83,7 @@ const DipFinder = () => {
             Dip Finder
           </h1>
           <p className="mt-1 text-muted-foreground">
-            Discover stocks trading below key technical levels
+            Discover stocks trading below key technical levels (live data)
           </p>
         </div>
 
@@ -141,11 +174,15 @@ const DipFinder = () => {
                   <div className="mt-4 grid grid-cols-2 gap-4 text-sm">
                     <div>
                       <p className="text-muted-foreground">200-day MA</p>
-                      <p className="font-mono font-medium">${stock.movingAverage200.toFixed(2)}</p>
+                      <p className="font-mono font-medium">
+                        {stock.movingAverage200 > 0 ? `$${stock.movingAverage200.toFixed(2)}` : 'N/A'}
+                      </p>
                     </div>
                     <div>
                       <p className="text-muted-foreground">52W High</p>
-                      <p className="font-mono font-medium">${stock.fiftyTwoWeekHigh.toFixed(2)}</p>
+                      <p className="font-mono font-medium">
+                        {stock.fiftyTwoWeekHigh > 0 ? `$${stock.fiftyTwoWeekHigh.toFixed(2)}` : 'N/A'}
+                      </p>
                     </div>
                   </div>
                 </Card>

@@ -6,22 +6,54 @@ import {
   DollarSign,
   BarChart3,
   Clock,
+  Loader2,
+  AlertCircle,
 } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { StockCard } from '@/components/stocks/StockCard';
 import { StatCard } from '@/components/ui/stat-card';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { popularStocks, europeanStocks, upcomingEarnings, sampleNews } from '@/lib/mockData';
+import { useStocks } from '@/hooks/useStocks';
+import { upcomingEarnings, sampleNews } from '@/lib/mockData';
 
 const Dashboard = () => {
-  // Calculate market summary
-  const allStocks = [...popularStocks, ...europeanStocks];
-  const gainers = allStocks.filter(s => s.change > 0).sort((a, b) => b.changePercent - a.changePercent);
-  const losers = allStocks.filter(s => s.change < 0).sort((a, b) => a.changePercent - b.changePercent);
+  const { data: allStocks, isLoading, error } = useStocks();
+
+  if (isLoading) {
+    return (
+      <MainLayout>
+        <div className="flex flex-col items-center justify-center py-24">
+          <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
+          <p className="text-muted-foreground">Loading live stock data...</p>
+        </div>
+      </MainLayout>
+    );
+  }
+
+  if (error || !allStocks) {
+    return (
+      <MainLayout>
+        <div className="flex flex-col items-center justify-center py-24">
+          <AlertCircle className="h-8 w-8 text-destructive mb-4" />
+          <h2 className="text-xl font-semibold text-foreground">Failed to load stock data</h2>
+          <p className="text-muted-foreground mt-2">Please try refreshing the page</p>
+        </div>
+      </MainLayout>
+    );
+  }
+
+  // Filter out stocks with errors or zero prices
+  const validStocks = allStocks.filter(s => s.price > 0);
   
-  const totalMarketCap = allStocks.reduce((sum, s) => sum + s.marketCap, 0);
-  const avgChange = allStocks.reduce((sum, s) => sum + s.changePercent, 0) / allStocks.length;
+  // Calculate market summary
+  const gainers = validStocks.filter(s => s.change > 0).sort((a, b) => b.changePercent - a.changePercent);
+  const losers = validStocks.filter(s => s.change < 0).sort((a, b) => a.changePercent - b.changePercent);
+  
+  const totalMarketCap = validStocks.reduce((sum, s) => sum + s.marketCap, 0);
+  const avgChange = validStocks.length > 0 
+    ? validStocks.reduce((sum, s) => sum + s.changePercent, 0) / validStocks.length 
+    : 0;
 
   return (
     <MainLayout>
@@ -30,7 +62,7 @@ const Dashboard = () => {
         <div>
           <h1 className="text-3xl font-bold text-foreground">Market Overview</h1>
           <p className="mt-1 text-muted-foreground">
-            Track market trends and discover investment opportunities
+            Live market data • Track trends and discover opportunities
           </p>
         </div>
 
@@ -42,12 +74,12 @@ const Dashboard = () => {
             prefix="$"
             suffix="T"
             change={avgChange}
-            changeLabel="today"
+            changeLabel="avg today"
             icon={<DollarSign className="h-5 w-5" />}
           />
           <StatCard
             title="Active Stocks"
-            value={allStocks.length}
+            value={validStocks.length}
             icon={<BarChart3 className="h-5 w-5" />}
           />
           <StatCard
@@ -185,7 +217,7 @@ const Dashboard = () => {
             </Link>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {popularStocks.slice(0, 4).map((stock) => (
+            {validStocks.slice(0, 4).map((stock) => (
               <StockCard key={stock.symbol} stock={stock} showDetails />
             ))}
           </div>

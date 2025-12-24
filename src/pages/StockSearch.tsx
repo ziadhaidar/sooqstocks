@@ -1,9 +1,8 @@
 import { useState } from 'react';
-import { Search, Filter, Globe } from 'lucide-react';
+import { Search, Filter, Globe, Loader2, AlertCircle } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { StockCard } from '@/components/stocks/StockCard';
 import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
 import {
   Select,
   SelectContent,
@@ -12,18 +11,49 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { popularStocks, europeanStocks } from '@/lib/mockData';
+import { useStocks, useUSStocks, useEUStocks } from '@/hooks/useStocks';
+import { Stock } from '@/lib/types';
 
 const StockSearch = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [sectorFilter, setSectorFilter] = useState('all');
   const [sortBy, setSortBy] = useState('marketCap');
 
-  const allStocks = [...popularStocks, ...europeanStocks];
-  
-  const sectors = [...new Set(allStocks.map(s => s.sector))];
+  const { data: allStocks, isLoading, error } = useStocks();
+  const { data: usStocksRaw } = useUSStocks();
+  const { data: euStocksRaw } = useEUStocks();
 
-  const filterAndSort = (stocks: typeof allStocks) => {
+  if (isLoading) {
+    return (
+      <MainLayout>
+        <div className="flex flex-col items-center justify-center py-24">
+          <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
+          <p className="text-muted-foreground">Loading stock data...</p>
+        </div>
+      </MainLayout>
+    );
+  }
+
+  if (error || !allStocks) {
+    return (
+      <MainLayout>
+        <div className="flex flex-col items-center justify-center py-24">
+          <AlertCircle className="h-8 w-8 text-destructive mb-4" />
+          <h2 className="text-xl font-semibold text-foreground">Failed to load stocks</h2>
+          <p className="text-muted-foreground mt-2">Please try again later</p>
+        </div>
+      </MainLayout>
+    );
+  }
+
+  // Filter valid stocks (with price > 0)
+  const validStocks = allStocks.filter(s => s.price > 0);
+  const usStocks = usStocksRaw?.filter(s => s.price > 0) || [];
+  const euStocks = euStocksRaw?.filter(s => s.price > 0) || [];
+
+  const sectors = [...new Set(validStocks.map(s => s.sector).filter(Boolean))];
+
+  const filterAndSort = (stocks: Stock[]) => {
     return stocks
       .filter(stock => {
         const matchesSearch =
@@ -41,16 +71,16 @@ const StockSearch = () => {
           case 'price':
             return b.price - a.price;
           case 'pe':
-            return a.peRatio - b.peRatio;
+            return (a.peRatio || 999) - (b.peRatio || 999);
           default:
             return 0;
         }
       });
   };
 
-  const usStocks = filterAndSort(popularStocks);
-  const euStocks = filterAndSort(europeanStocks);
-  const allFiltered = filterAndSort(allStocks);
+  const filteredUs = filterAndSort(usStocks);
+  const filteredEu = filterAndSort(euStocks);
+  const filteredAll = filterAndSort(validStocks);
 
   return (
     <MainLayout>
@@ -59,7 +89,7 @@ const StockSearch = () => {
         <div>
           <h1 className="text-3xl font-bold text-foreground">Stock Search</h1>
           <p className="mt-1 text-muted-foreground">
-            Browse and analyze U.S. and European stocks
+            Browse and analyze U.S. and European stocks with live data
           </p>
         </div>
 
@@ -107,23 +137,23 @@ const StockSearch = () => {
           <TabsList className="bg-secondary">
             <TabsTrigger value="all" className="flex items-center gap-2">
               <Globe className="h-4 w-4" />
-              All Markets ({allFiltered.length})
+              All Markets ({filteredAll.length})
             </TabsTrigger>
             <TabsTrigger value="us">
-              🇺🇸 U.S. ({usStocks.length})
+              🇺🇸 U.S. ({filteredUs.length})
             </TabsTrigger>
             <TabsTrigger value="eu">
-              🇪🇺 Europe ({euStocks.length})
+              🇪🇺 Europe ({filteredEu.length})
             </TabsTrigger>
           </TabsList>
 
           <TabsContent value="all" className="mt-6">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {allFiltered.map(stock => (
+              {filteredAll.map(stock => (
                 <StockCard key={stock.symbol} stock={stock} showDetails />
               ))}
             </div>
-            {allFiltered.length === 0 && (
+            {filteredAll.length === 0 && (
               <div className="text-center py-12 text-muted-foreground">
                 No stocks found matching your criteria
               </div>
@@ -132,7 +162,7 @@ const StockSearch = () => {
 
           <TabsContent value="us" className="mt-6">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {usStocks.map(stock => (
+              {filteredUs.map(stock => (
                 <StockCard key={stock.symbol} stock={stock} showDetails />
               ))}
             </div>
@@ -140,7 +170,7 @@ const StockSearch = () => {
 
           <TabsContent value="eu" className="mt-6">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {euStocks.map(stock => (
+              {filteredEu.map(stock => (
                 <StockCard key={stock.symbol} stock={stock} showDetails />
               ))}
             </div>
