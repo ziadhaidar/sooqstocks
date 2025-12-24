@@ -10,23 +10,30 @@ import {
   Settings,
   TrendingDown,
   LineChart,
+  LogOut,
+  Shield,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-
-const navigation = [
-  { name: 'Dashboard', href: '/', icon: LayoutDashboard },
-  { name: 'Stock Search', href: '/search', icon: Search },
-  { name: 'Watchlist', href: '/watchlist', icon: Star },
-  { name: 'Dip Finder', href: '/dips', icon: TrendingDown },
-  { name: 'Portfolio', href: '/portfolio', icon: Briefcase },
-  { name: 'DCF Calculator', href: '/dcf', icon: Calculator },
-  { name: 'Earnings', href: '/earnings', icon: Calendar },
-  { name: 'News', href: '/news', icon: Newspaper },
-  { name: 'Settings', href: '/settings', icon: Settings },
-];
+import { useAuth } from '@/contexts/AuthContext';
+import { Button } from '@/components/ui/button';
 
 export function Sidebar() {
   const location = useLocation();
+  const { user, isAdmin, logout } = useAuth();
+
+  const navigation = [
+    { name: 'Dashboard', href: '/', icon: LayoutDashboard, adminOnly: false },
+    { name: 'Stock Search', href: '/search', icon: Search, adminOnly: false },
+    { name: 'Watchlist', href: '/watchlist', icon: Star, adminOnly: true },
+    { name: 'Dip Finder', href: '/dips', icon: TrendingDown, adminOnly: false },
+    { name: 'Portfolio', href: '/portfolio', icon: Briefcase, adminOnly: true },
+    { name: 'DCF Calculator', href: '/dcf', icon: Calculator, adminOnly: false },
+    { name: 'Earnings', href: '/earnings', icon: Calendar, adminOnly: false },
+    { name: 'News', href: '/news', icon: Newspaper, adminOnly: false },
+    { name: 'Settings', href: '/settings', icon: Settings, adminOnly: true },
+  ];
+
+  const visibleNavigation = navigation.filter(item => !item.adminOnly || isAdmin);
 
   return (
     <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r border-border bg-sidebar">
@@ -42,9 +49,20 @@ export function Sidebar() {
           </div>
         </div>
 
+        {/* User Info */}
+        <div className="px-3 py-3 border-b border-border">
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-secondary/50">
+            {isAdmin && <Shield className="h-4 w-4 text-primary" />}
+            <span className="text-sm font-medium text-foreground">{user?.username}</span>
+            {isAdmin && (
+              <span className="text-xs text-primary ml-auto">Admin</span>
+            )}
+          </div>
+        </div>
+
         {/* Navigation */}
         <nav className="flex-1 space-y-1 px-3 py-4">
-          {navigation.map((item) => {
+          {visibleNavigation.map((item) => {
             const isActive = location.pathname === item.href;
             return (
               <Link
@@ -65,15 +83,24 @@ export function Sidebar() {
         </nav>
 
         {/* Footer */}
-        <div className="border-t border-border p-4">
+        <div className="border-t border-border p-4 space-y-3">
           <div className="rounded-lg bg-secondary/50 p-3">
             <p className="text-xs text-muted-foreground">
-              Data refreshes automatically
+              Live data from Finnhub
             </p>
             <p className="mt-1 text-xs font-medium text-primary">
-              Last updated: Just now
+              Refreshes every 5 min
             </p>
           </div>
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            className="w-full justify-start text-muted-foreground hover:text-foreground"
+            onClick={logout}
+          >
+            <LogOut className="h-4 w-4 mr-2" />
+            Sign Out
+          </Button>
         </div>
       </div>
     </aside>

@@ -9,6 +9,8 @@ import {
   Globe,
   BarChart3,
   Sparkles,
+  Loader2,
+  AlertCircle,
 } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Card } from '@/components/ui/card';
@@ -17,23 +19,23 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PriceChart, RevenueChart, CashFlowChart, RatiosChart } from '@/components/charts/FinancialCharts';
 import {
-  popularStocks,
-  europeanStocks,
   generateFinancialStatements,
   generateKeyRatios,
   generatePriceHistory,
   sampleNews,
 } from '@/lib/mockData';
+import { useStock } from '@/hooks/useStocks';
 import { addToWatchlist, getWatchlists } from '@/lib/storage';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 
 const StockProfile = () => {
   const { symbol } = useParams<{ symbol: string }>();
   const { toast } = useToast();
+  const { isAdmin } = useAuth();
 
-  const allStocks = [...popularStocks, ...europeanStocks];
-  const stock = allStocks.find(s => s.symbol === symbol);
+  const { data: stock, isLoading, error } = useStock(symbol || '');
 
   const financials = useMemo(() => 
     stock ? generateFinancialStatements(stock.symbol) : [], 
@@ -58,6 +60,12 @@ const StockProfile = () => {
         title: 'Added to Watchlist',
         description: `${stock.symbol} has been added to your watchlist.`,
       });
+    } else {
+      toast({
+        title: 'No Watchlist',
+        description: 'Create a watchlist first to add stocks.',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -67,13 +75,13 @@ const StockProfile = () => {
     
     const analyses = [];
     
-    if (stock.peRatio < 20) {
+    if (stock.peRatio > 0 && stock.peRatio < 20) {
       analyses.push(`${stock.name} appears undervalued with a P/E ratio of ${stock.peRatio.toFixed(1)}, below the market average.`);
     } else if (stock.peRatio > 30) {
       analyses.push(`${stock.name} trades at a premium with a P/E of ${stock.peRatio.toFixed(1)}, suggesting high growth expectations.`);
     }
     
-    if (stock.price < stock.movingAverage200) {
+    if (stock.movingAverage200 > 0 && stock.price < stock.movingAverage200) {
       analyses.push(`The stock is currently trading below its 200-day moving average, indicating potential buying opportunity.`);
     }
     
@@ -94,12 +102,24 @@ const StockProfile = () => {
       : `${stock.name} shows stable performance with balanced valuation metrics.`;
   };
 
-  if (!stock) {
+  if (isLoading) {
     return (
       <MainLayout>
         <div className="flex flex-col items-center justify-center py-24">
+          <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
+          <p className="text-muted-foreground">Loading stock data...</p>
+        </div>
+      </MainLayout>
+    );
+  }
+
+  if (error || !stock) {
+    return (
+      <MainLayout>
+        <div className="flex flex-col items-center justify-center py-24">
+          <AlertCircle className="h-8 w-8 text-destructive mb-4" />
           <h1 className="text-2xl font-bold text-foreground">Stock Not Found</h1>
-          <p className="mt-2 text-muted-foreground">The symbol {symbol} was not found.</p>
+          <p className="mt-2 text-muted-foreground">The symbol {symbol} was not found or failed to load.</p>
           <Link to="/search">
             <Button className="mt-4">Browse Stocks</Button>
           </Link>
@@ -109,7 +129,7 @@ const StockProfile = () => {
   }
 
   const isPositive = stock.change >= 0;
-  const isBelowMA = stock.price < stock.movingAverage200;
+  const isBelowMA = stock.movingAverage200 > 0 && stock.price < stock.movingAverage200;
 
   return (
     <MainLayout>
@@ -149,10 +169,12 @@ const StockProfile = () => {
           </div>
 
           <div className="flex items-center gap-3">
-            <Button variant="outline" onClick={handleAddToWatchlist}>
-              <Star className="h-4 w-4 mr-2" />
-              Add to Watchlist
-            </Button>
+            {isAdmin && (
+              <Button variant="outline" onClick={handleAddToWatchlist}>
+                <Star className="h-4 w-4 mr-2" />
+                Add to Watchlist
+              </Button>
+            )}
             <Link to={`/dcf?symbol=${stock.symbol}`}>
               <Button className="gradient-primary text-primary-foreground">
                 <BarChart3 className="h-4 w-4 mr-2" />
@@ -185,21 +207,29 @@ const StockProfile = () => {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-6">
               <div>
                 <p className="text-sm text-muted-foreground">Market Cap</p>
-                <p className="text-lg font-semibold font-mono">${(stock.marketCap / 1e9).toFixed(1)}B</p>
+                <p className="text-lg font-semibold font-mono">
+                  {stock.marketCap > 0 ? `$${(stock.marketCap / 1e9).toFixed(1)}B` : 'N/A'}
+                </p>
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">P/E Ratio</p>
-                <p className="text-lg font-semibold font-mono">{stock.peRatio.toFixed(1)}</p>
+                <p className="text-lg font-semibold font-mono">
+                  {stock.peRatio > 0 ? stock.peRatio.toFixed(1) : 'N/A'}
+                </p>
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">52W Range</p>
                 <p className="text-lg font-semibold font-mono">
-                  ${stock.fiftyTwoWeekLow.toFixed(0)} - ${stock.fiftyTwoWeekHigh.toFixed(0)}
+                  {stock.fiftyTwoWeekLow > 0 && stock.fiftyTwoWeekHigh > 0 
+                    ? `$${stock.fiftyTwoWeekLow.toFixed(0)} - $${stock.fiftyTwoWeekHigh.toFixed(0)}`
+                    : 'N/A'}
                 </p>
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Div Yield</p>
-                <p className="text-lg font-semibold font-mono">{stock.dividendYield.toFixed(2)}%</p>
+                <p className="text-lg font-semibold font-mono">
+                  {stock.dividendYield > 0 ? `${stock.dividendYield.toFixed(2)}%` : '0%'}
+                </p>
               </div>
             </div>
           </div>

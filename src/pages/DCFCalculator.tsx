@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
-import { Calculator, DollarSign, TrendingUp, Info } from 'lucide-react';
+import { Calculator, DollarSign, TrendingUp, Info, Loader2, AlertCircle } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -30,7 +30,8 @@ import {
   ResponsiveContainer,
   ReferenceLine,
 } from 'recharts';
-import { popularStocks, europeanStocks, generateFinancialStatements } from '@/lib/mockData';
+import { useStocks, useStock } from '@/hooks/useStocks';
+import { generateFinancialStatements } from '@/lib/mockData';
 import { DCFInputs, DCFResult } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
@@ -38,18 +39,18 @@ const DCFCalculator = () => {
   const [searchParams] = useSearchParams();
   const symbolParam = searchParams.get('symbol');
 
-  const allStocks = useMemo(() => [...popularStocks, ...europeanStocks], []);
-
+  const { data: allStocks, isLoading: stocksLoading } = useStocks();
   const [selectedSymbol, setSelectedSymbol] = useState(symbolParam || 'AAPL');
+  
+  const { data: stock, isLoading: stockLoading } = useStock(selectedSymbol);
 
-  const stock = allStocks.find(s => s.symbol === selectedSymbol);
   const financials = useMemo(() => 
     stock ? generateFinancialStatements(stock.symbol) : [],
     [stock?.symbol]
   );
 
   const latestFCF = financials.length > 0 ? financials[0].freeCashFlow : 10000;
-  const sharesOutstanding = stock ? stock.marketCap / stock.price : 1000;
+  const sharesOutstanding = stock && stock.price > 0 ? stock.marketCap / stock.price : 1000;
 
   const [inputs, setInputs] = useState<DCFInputs>({
     freeCashFlow: latestFCF,
@@ -57,18 +58,31 @@ const DCFCalculator = () => {
     growthRateYear6to10: 8,
     terminalGrowthRate: 2.5,
     discountRate: 10,
-    sharesOutstanding: sharesOutstanding / 1000000, // millions
+    sharesOutstanding: sharesOutstanding / 1000000,
     cashAndEquivalents: latestFCF * 2,
     totalDebt: latestFCF * 0.5,
   });
 
+  // Update inputs when stock changes
+  useMemo(() => {
+    if (stock && stock.price > 0) {
+      const newSharesOutstanding = stock.marketCap / stock.price / 1000000;
+      setInputs(prev => ({
+        ...prev,
+        freeCashFlow: financials[0]?.freeCashFlow || latestFCF,
+        sharesOutstanding: newSharesOutstanding,
+        cashAndEquivalents: (financials[0]?.freeCashFlow || latestFCF) * 2,
+        totalDebt: (financials[0]?.freeCashFlow || latestFCF) * 0.5,
+      }));
+    }
+  }, [stock, financials, latestFCF]);
+
   const dcfResult = useMemo<DCFResult | null>(() => {
-    if (!stock) return null;
+    if (!stock || stock.price <= 0) return null;
 
     const projectedCashFlows: { year: number; cashFlow: number; discountedCashFlow: number }[] = [];
     let sumDiscountedCF = 0;
 
-    // Project years 1-5
     let fcf = inputs.freeCashFlow;
     for (let year = 1; year <= 5; year++) {
       fcf = fcf * (1 + inputs.growthRateYear1to5 / 100);
@@ -82,7 +96,6 @@ const DCFCalculator = () => {
       sumDiscountedCF += dcf;
     }
 
-    // Project years 6-10
     for (let year = 6; year <= 10; year++) {
       fcf = fcf * (1 + inputs.growthRateYear6to10 / 100);
       const discountFactor = Math.pow(1 + inputs.discountRate / 100, year);
@@ -95,21 +108,13 @@ const DCFCalculator = () => {
       sumDiscountedCF += dcf;
     }
 
-    // Terminal value
     const terminalFCF = fcf * (1 + inputs.terminalGrowthRate / 100);
     const terminalValue = terminalFCF / ((inputs.discountRate - inputs.terminalGrowthRate) / 100);
     const discountedTerminalValue = terminalValue / Math.pow(1 + inputs.discountRate / 100, 10);
 
-    // Enterprise value
     const enterpriseValue = sumDiscountedCF + discountedTerminalValue;
-
-    // Equity value
     const equityValue = enterpriseValue + inputs.cashAndEquivalents - inputs.totalDebt;
-
-    // Intrinsic value per share
     const intrinsicValue = equityValue / inputs.sharesOutstanding;
-
-    // Upside
     const upside = ((intrinsicValue - stock.price) / stock.price) * 100;
 
     return {
@@ -124,6 +129,19 @@ const DCFCalculator = () => {
   const handleInputChange = (field: keyof DCFInputs, value: number) => {
     setInputs(prev => ({ ...prev, [field]: value }));
   };
+
+  if (stocksLoading || stockLoading) {
+    return (
+      <MainLayout>
+        <div className="flex flex-col items-center justify-center py-24">
+          <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
+          <p className="text-muted-foreground">Loading stock data...</p>
+        </div>
+      </MainLayout>
+    );
+  }
+
+  const validStocks = allStocks?.filter(s => s.price > 0) || [];
 
   return (
     <MainLayout>
@@ -145,7 +163,7 @@ const DCFCalculator = () => {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {allStocks.map(s => (
+              {validStocks.map(s => (
                 <SelectItem key={s.symbol} value={s.symbol}>
                   {s.symbol} - {s.name}
                 </SelectItem>
@@ -154,7 +172,7 @@ const DCFCalculator = () => {
           </Select>
         </div>
 
-        {stock && dcfResult && (
+        {stock && stock.price > 0 && dcfResult ? (
           <>
             {/* Result Summary */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -389,6 +407,14 @@ const DCFCalculator = () => {
               </Link>
             </div>
           </>
+        ) : (
+          <Card className="p-12 text-center">
+            <AlertCircle className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+            <h3 className="text-lg font-semibold">Stock data unavailable</h3>
+            <p className="text-muted-foreground mt-2">
+              Please select a different stock or try again later
+            </p>
+          </Card>
         )}
       </div>
     </MainLayout>
