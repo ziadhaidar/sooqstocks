@@ -21,10 +21,11 @@ export function useStocks() {
   return useQuery({
     queryKey: ['stocks'],
     queryFn: fetchStocks,
-    staleTime: 30 * 1000, // 30 seconds - data considered fresh
+    staleTime: 5 * 60 * 1000, // 5 minutes - data considered fresh
     gcTime: 60 * 60 * 1000, // 1 hour cache
-    refetchInterval: 45 * 1000, // Refetch every 45 seconds
-    retry: 2,
+    refetchInterval: 5 * 60 * 1000, // Refetch every 5 minutes
+    retry: 3,
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
     refetchOnWindowFocus: false, // Prevent excessive refetches
   });
 }
