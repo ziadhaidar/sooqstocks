@@ -13,32 +13,6 @@ interface FinnhubQuote {
   l: number;  // Low price of the day
   o: number;  // Open price of the day
   pc: number; // Previous close price
-  t: number;  // Timestamp
-}
-
-interface FinnhubProfile {
-  country: string;
-  currency: string;
-  exchange: string;
-  finnhubIndustry: string;
-  ipo: string;
-  logo: string;
-  marketCapitalization: number;
-  name: string;
-  phone: string;
-  shareOutstanding: number;
-  ticker: string;
-  weburl: string;
-}
-
-interface FinnhubMetric {
-  metric: {
-    '52WeekHigh': number;
-    '52WeekLow': number;
-    peNormalizedAnnual: number;
-    dividendYieldIndicatedAnnual: number;
-    '200DayMovingAverage': number;
-  };
 }
 
 interface SymbolInfo {
@@ -53,9 +27,9 @@ interface CacheEntry {
   timestamp: number;
 }
 
-// In-memory cache with 45-second TTL
+// In-memory cache with 5-minute TTL
 const cache: Map<string, CacheEntry> = new Map();
-const CACHE_TTL = 45 * 1000; // 45 seconds
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 function getCached(key: string): unknown | null {
   const entry = cache.get(key);
@@ -71,9 +45,9 @@ function setCache(key: string, data: unknown): void {
 }
 
 // Rate limiting: Finnhub free tier = 60 calls/minute
-// We'll batch requests and add delays to stay within limits
-const BATCH_SIZE = 10; // Process 10 symbols at a time
-const BATCH_DELAY = 1000; // 1 second between batches
+// With 60 stocks, 1 call each = 60 calls, just within limit
+const BATCH_SIZE = 5; // Process 5 symbols at a time
+const BATCH_DELAY = 1500; // 1.5 seconds between batches
 
 async function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -84,8 +58,8 @@ async function fetchWithRetry(url: string, retries = 2): Promise<Response> {
     try {
       const response = await fetch(url);
       if (response.status === 429) {
-        // Rate limited, wait and retry
-        await sleep(2000);
+        console.log('Rate limited, waiting 3s...');
+        await sleep(3000);
         continue;
       }
       return response;
@@ -97,7 +71,7 @@ async function fetchWithRetry(url: string, retries = 2): Promise<Response> {
   throw new Error('Max retries exceeded');
 }
 
-async function fetchSymbolData(
+async function fetchSymbolQuote(
   symbolInfo: SymbolInfo,
   apiKey: string
 ): Promise<unknown> {
@@ -109,72 +83,39 @@ async function fetchSymbolData(
   }
 
   try {
-    // Fetch only quote data for speed (metrics and profile are slower)
+    // Only fetch quote data (1 API call per stock)
     const quoteRes = await fetchWithRetry(
       `https://finnhub.io/api/v1/quote?symbol=${symbolInfo.symbol}&token=${apiKey}`
     );
     const quote: FinnhubQuote = await quoteRes.json();
 
-    // Only fetch additional data if we got a valid quote
-    let metrics: FinnhubMetric = { metric: {} as FinnhubMetric['metric'] };
-    let profile: FinnhubProfile = {} as FinnhubProfile;
-
-    if (quote.c && quote.c > 0) {
-      // Fetch basic metrics in parallel
-      const [metricRes, profileRes] = await Promise.all([
-        fetchWithRetry(
-          `https://finnhub.io/api/v1/stock/metric?symbol=${symbolInfo.symbol}&metric=all&token=${apiKey}`
-        ),
-        fetchWithRetry(
-          `https://finnhub.io/api/v1/stock/profile2?symbol=${symbolInfo.symbol}&token=${apiKey}`
-        ),
-      ]);
-
-      metrics = await metricRes.json();
-      profile = await profileRes.json();
-    }
-
-    // Map sector from Finnhub industry
-    const sectorMap: Record<string, string> = {
-      'Technology': 'Technology',
-      'Financial Services': 'Financial Services',
-      'Healthcare': 'Healthcare',
-      'Consumer Cyclical': 'Consumer Cyclical',
-      'Consumer Defensive': 'Consumer Defensive',
-      'Industrials': 'Industrials',
-      'Energy': 'Energy',
-      'Basic Materials': 'Materials',
-      'Communication Services': 'Communication Services',
-      'Utilities': 'Utilities',
-      'Real Estate': 'Real Estate',
-    };
-
-    const sector = sectorMap[profile.finnhubIndustry] || profile.finnhubIndustry || 'Technology';
-
+    // Basic stock data from quote only
     const stockData = {
       symbol: symbolInfo.symbol,
-      name: profile.name || symbolInfo.name,
+      name: symbolInfo.name,
       price: quote.c || 0,
       change: quote.d || 0,
       changePercent: quote.dp || 0,
       volume: 0,
-      marketCap: (profile.marketCapitalization || 0) * 1000000,
-      peRatio: metrics.metric?.peNormalizedAnnual || 0,
-      dividendYield: metrics.metric?.dividendYieldIndicatedAnnual || 0,
-      fiftyTwoWeekHigh: metrics.metric?.['52WeekHigh'] || quote.h,
-      fiftyTwoWeekLow: metrics.metric?.['52WeekLow'] || quote.l,
-      movingAverage200: metrics.metric?.['200DayMovingAverage'] || quote.c,
-      sector,
-      industry: profile.finnhubIndustry || 'Unknown',
-      exchange: profile.exchange || symbolInfo.exchange,
-      currency: profile.currency || symbolInfo.currency,
+      marketCap: 0,
+      peRatio: 0,
+      dividendYield: 0,
+      fiftyTwoWeekHigh: quote.h || 0,
+      fiftyTwoWeekLow: quote.l || 0,
+      movingAverage200: quote.pc || quote.c || 0, // Use prev close as proxy
+      sector: 'Technology', // Default sector
+      industry: 'Unknown',
+      exchange: symbolInfo.exchange,
+      currency: symbolInfo.currency,
     };
 
-    setCache(cacheKey, stockData);
+    if (quote.c && quote.c > 0) {
+      setCache(cacheKey, stockData);
+    }
+    
     return stockData;
   } catch (error) {
     console.error(`Error fetching ${symbolInfo.symbol}:`, error);
-    // Return placeholder with available info
     return {
       symbol: symbolInfo.symbol,
       name: symbolInfo.name,
@@ -202,14 +143,15 @@ async function fetchStocksBatched(
   apiKey: string
 ): Promise<unknown[]> {
   const results: unknown[] = [];
+  const totalBatches = Math.ceil(symbols.length / BATCH_SIZE);
   
-  // Process in batches to respect rate limits
   for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
     const batch = symbols.slice(i, i + BATCH_SIZE);
-    console.log(`Processing batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(symbols.length / BATCH_SIZE)}`);
+    const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+    console.log(`Processing batch ${batchNum}/${totalBatches} (${batch.map(s => s.symbol).join(', ')})`);
     
     const batchResults = await Promise.all(
-      batch.map(symbol => fetchSymbolData(symbol, apiKey))
+      batch.map(symbol => fetchSymbolQuote(symbol, apiKey))
     );
     
     results.push(...batchResults);
@@ -224,7 +166,6 @@ async function fetchStocksBatched(
 }
 
 serve(async (req) => {
-  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
@@ -246,14 +187,13 @@ serve(async (req) => {
       );
       const searchData = await searchRes.json();
       
-      // Filter to only stock types and US exchanges
       const results = (searchData.result || [])
         .filter((r: { type: string; displaySymbol: string }) => 
           r.type === 'Common Stock' && 
           !r.displaySymbol.includes('.')
         )
         .slice(0, 10)
-        .map((r: { symbol: string; description: string; displaySymbol: string }) => ({
+        .map((r: { symbol: string; description: string }) => ({
           symbol: r.symbol,
           name: r.description,
           exchange: 'NYSE',
@@ -270,11 +210,13 @@ serve(async (req) => {
     }
 
     console.log(`Fetching data for ${symbols.length} symbols`);
+    const startTime = Date.now();
 
     const stockData = await fetchStocksBatched(symbols, apiKey);
 
     const successCount = stockData.filter((s) => !(s as { error?: boolean }).error).length;
-    console.log(`Successfully fetched ${successCount} stocks`);
+    const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+    console.log(`Completed: ${successCount}/${symbols.length} stocks in ${duration}s`);
 
     return new Response(JSON.stringify({ stocks: stockData }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
