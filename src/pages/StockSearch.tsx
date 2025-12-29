@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Search, Filter, Globe, Loader2, AlertCircle } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { StockCard } from '@/components/stocks/StockCard';
+import { SymbolSearch } from '@/components/stocks/SymbolSearch';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -131,6 +132,9 @@ const StockSearch = () => {
             </SelectContent>
           </Select>
         </div>
+
+        {/* On-demand Symbol Search */}
+        <SymbolSearch />
 
         {/* Tabs */}
         <Tabs defaultValue="all" className="w-full">
