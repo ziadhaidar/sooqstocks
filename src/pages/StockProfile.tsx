@@ -19,7 +19,6 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { sampleNews } from '@/lib/mockData';
 import { useDetailedStock } from '@/hooks/useStocks';
 import { addToWatchlist, getWatchlists } from '@/lib/storage';
 import { useToast } from '@/hooks/use-toast';
@@ -33,7 +32,7 @@ const StockProfile = () => {
 
   const { data: stock, isLoading, error } = useDetailedStock(symbol || '');
 
-  const stockNews = sampleNews.filter(n => n.symbols.includes(symbol || ''));
+  
 
   const handleAddToWatchlist = () => {
     if (!stock) return;
@@ -338,35 +337,6 @@ const StockProfile = () => {
           </AlertDescription>
         </Alert>
 
-        {/* Related News */}
-        {stockNews.length > 0 && (
-          <Card className="p-6">
-            <h3 className="text-lg font-semibold mb-4">Related News</h3>
-            <div className="space-y-4">
-              {stockNews.map(news => (
-                <div key={news.id} className="p-4 rounded-lg bg-secondary/30">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Badge
-                      variant="outline"
-                      className={
-                        news.sentiment === 'positive'
-                          ? 'border-success text-success'
-                          : news.sentiment === 'negative'
-                          ? 'border-destructive text-destructive'
-                          : ''
-                      }
-                    >
-                      {news.sentiment}
-                    </Badge>
-                    <span className="text-xs text-muted-foreground">{news.source}</span>
-                  </div>
-                  <h4 className="font-medium">{news.title}</h4>
-                  <p className="mt-1 text-sm text-muted-foreground">{news.summary}</p>
-                </div>
-              ))}
-            </div>
-          </Card>
-        )}
       </div>
     </MainLayout>
   );
