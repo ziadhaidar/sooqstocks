@@ -58,6 +58,43 @@ export function useStock(symbol: string) {
   return { data: stock, ...rest };
 }
 
+// Fetch detailed stock data (includes profile + basic-financials metrics)
+async function fetchDetailedStock(symbolInfo: SymbolInfo): Promise<Stock> {
+  const { data, error } = await supabase.functions.invoke('fetch-stocks', {
+    body: { symbols: [symbolInfo], detailed: true },
+  });
+
+  if (error) {
+    console.error('Error fetching detailed stock:', error);
+    throw error;
+  }
+
+  return data.stocks[0] as Stock;
+}
+
+export function useDetailedStock(symbol: string) {
+  // First check if we have basic data in the cache
+  const { data: basicStock } = useStock(symbol);
+  
+  // Construct symbol info from what we know
+  const symbolInfo: SymbolInfo = {
+    symbol: symbol.toUpperCase(),
+    name: basicStock?.name || symbol,
+    exchange: basicStock?.exchange || 'NYSE',
+    currency: basicStock?.currency || 'USD',
+    region: 'US',
+  };
+
+  return useQuery({
+    queryKey: ['stock-detailed', symbol.toUpperCase()],
+    queryFn: () => fetchDetailedStock(symbolInfo),
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    gcTime: 30 * 60 * 1000, // 30 minutes cache
+    retry: 2,
+    enabled: !!symbol,
+  });
+}
+
 // On-demand symbol search for stocks not in predefined list
 interface SearchResult {
   symbol: string;

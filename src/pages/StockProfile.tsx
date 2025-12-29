@@ -1,5 +1,4 @@
 import { useParams, Link } from 'react-router-dom';
-import { useMemo } from 'react';
 import {
   ArrowLeft,
   Star,
@@ -11,20 +10,17 @@ import {
   Sparkles,
   Loader2,
   AlertCircle,
+  ExternalLink,
+  Calendar,
+  Info,
 } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { PriceChart, RevenueChart, CashFlowChart, RatiosChart } from '@/components/charts/FinancialCharts';
-import {
-  generateFinancialStatements,
-  generateKeyRatios,
-  generatePriceHistory,
-  sampleNews,
-} from '@/lib/mockData';
-import { useStock } from '@/hooks/useStocks';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { sampleNews } from '@/lib/mockData';
+import { useDetailedStock } from '@/hooks/useStocks';
 import { addToWatchlist, getWatchlists } from '@/lib/storage';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
@@ -35,20 +31,8 @@ const StockProfile = () => {
   const { toast } = useToast();
   const { isAdmin } = useAuth();
 
-  const { data: stock, isLoading, error } = useStock(symbol || '');
+  const { data: stock, isLoading, error } = useDetailedStock(symbol || '');
 
-  const financials = useMemo(() => 
-    stock ? generateFinancialStatements(stock.symbol) : [], 
-    [stock?.symbol]
-  );
-  
-  const ratios = useMemo(() => 
-    stock ? generateKeyRatios(stock) : null, 
-    [stock]
-  );
-  
-  const priceHistory = useMemo(() => generatePriceHistory(365), []);
-  
   const stockNews = sampleNews.filter(n => n.symbols.includes(symbol || ''));
 
   const handleAddToWatchlist = () => {
@@ -69,9 +53,9 @@ const StockProfile = () => {
     }
   };
 
-  // Generate AI Analysis
+  // Generate AI Analysis based on real data
   const generateAnalysis = () => {
-    if (!stock || !ratios) return '';
+    if (!stock) return '';
     
     const analyses = [];
     
@@ -81,25 +65,38 @@ const StockProfile = () => {
       analyses.push(`${stock.name} trades at a premium with a P/E of ${stock.peRatio.toFixed(1)}, suggesting high growth expectations.`);
     }
     
-    if (stock.movingAverage200 > 0 && stock.price < stock.movingAverage200) {
-      analyses.push(`The stock is currently trading below its 200-day moving average, indicating potential buying opportunity.`);
+    if (stock.fiftyTwoWeekHigh > 0 && stock.fiftyTwoWeekLow > 0) {
+      const range = stock.fiftyTwoWeekHigh - stock.fiftyTwoWeekLow;
+      const position = ((stock.price - stock.fiftyTwoWeekLow) / range) * 100;
+      if (position < 30) {
+        analyses.push(`Trading near 52-week lows at ${position.toFixed(0)}% of the range could present a buying opportunity.`);
+      } else if (position > 70) {
+        analyses.push(`Trading near 52-week highs at ${position.toFixed(0)}% of the range.`);
+      }
     }
     
     if (stock.dividendYield > 2) {
       analyses.push(`With a dividend yield of ${stock.dividendYield.toFixed(2)}%, this stock offers attractive income potential.`);
     }
     
-    if (ratios.debtToEquity < 0.5) {
-      analyses.push(`Strong balance sheet with debt-to-equity of ${ratios.debtToEquity.toFixed(2)} provides financial flexibility.`);
+    if (stock.roe && stock.roe > 15) {
+      analyses.push(`Return on equity of ${stock.roe.toFixed(1)}% demonstrates efficient capital allocation.`);
     }
     
-    if (ratios.roe > 0.15) {
-      analyses.push(`Return on equity of ${(ratios.roe * 100).toFixed(1)}% demonstrates efficient capital allocation.`);
+    if (stock.netMargin && stock.netMargin > 20) {
+      analyses.push(`Strong net profit margin of ${stock.netMargin.toFixed(1)}% indicates pricing power and operational efficiency.`);
     }
     
     return analyses.length > 0 
       ? analyses.join(' ') 
-      : `${stock.name} shows stable performance with balanced valuation metrics.`;
+      : `${stock.name} shows stable performance. Additional fundamental analysis is recommended.`;
+  };
+
+  const formatMarketCap = (cap: number) => {
+    if (cap >= 1e12) return `$${(cap / 1e12).toFixed(2)}T`;
+    if (cap >= 1e9) return `$${(cap / 1e9).toFixed(2)}B`;
+    if (cap >= 1e6) return `$${(cap / 1e6).toFixed(2)}M`;
+    return `$${cap.toLocaleString()}`;
   };
 
   if (isLoading) {
@@ -129,7 +126,6 @@ const StockProfile = () => {
   }
 
   const isPositive = stock.change >= 0;
-  const isBelowMA = stock.movingAverage200 > 0 && stock.price < stock.movingAverage200;
 
   return (
     <MainLayout>
@@ -149,11 +145,6 @@ const StockProfile = () => {
             <div className="flex items-center gap-3">
               <h1 className="text-3xl font-bold text-foreground">{stock.symbol}</h1>
               <Badge variant="outline">{stock.exchange}</Badge>
-              {isBelowMA && (
-                <Badge className="bg-warning/10 text-warning border-warning">
-                  Below 200-day MA
-                </Badge>
-              )}
             </div>
             <p className="mt-1 text-xl text-muted-foreground">{stock.name}</p>
             <div className="mt-2 flex items-center gap-4 text-sm text-muted-foreground">
@@ -161,10 +152,24 @@ const StockProfile = () => {
                 <Building2 className="h-4 w-4" />
                 {stock.sector}
               </span>
-              <span className="flex items-center gap-1">
-                <Globe className="h-4 w-4" />
-                {stock.industry}
-              </span>
+              {stock.weburl && (
+                <a 
+                  href={stock.weburl} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 hover:text-foreground transition-colors"
+                >
+                  <Globe className="h-4 w-4" />
+                  Website
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              )}
+              {stock.ipo && (
+                <span className="flex items-center gap-1">
+                  <Calendar className="h-4 w-4" />
+                  IPO: {stock.ipo}
+                </span>
+              )}
             </div>
           </div>
 
@@ -208,7 +213,7 @@ const StockProfile = () => {
               <div>
                 <p className="text-sm text-muted-foreground">Market Cap</p>
                 <p className="text-lg font-semibold font-mono">
-                  {stock.marketCap > 0 ? `$${(stock.marketCap / 1e9).toFixed(1)}B` : 'N/A'}
+                  {stock.marketCap > 0 ? formatMarketCap(stock.marketCap) : 'N/A'}
                 </p>
               </div>
               <div>
@@ -221,7 +226,7 @@ const StockProfile = () => {
                 <p className="text-sm text-muted-foreground">52W Range</p>
                 <p className="text-lg font-semibold font-mono">
                   {stock.fiftyTwoWeekLow > 0 && stock.fiftyTwoWeekHigh > 0 
-                    ? `$${stock.fiftyTwoWeekLow.toFixed(0)} - $${stock.fiftyTwoWeekHigh.toFixed(0)}`
+                    ? `$${stock.fiftyTwoWeekLow.toFixed(2)} - $${stock.fiftyTwoWeekHigh.toFixed(2)}`
                     : 'N/A'}
                 </p>
               </div>
@@ -253,86 +258,85 @@ const StockProfile = () => {
           </div>
         </Card>
 
-        {/* Charts Tabs */}
-        <Tabs defaultValue="price" className="w-full">
-          <TabsList className="bg-secondary">
-            <TabsTrigger value="price">Price History</TabsTrigger>
-            <TabsTrigger value="financials">Financials</TabsTrigger>
-            <TabsTrigger value="cashflow">Cash Flow</TabsTrigger>
-            <TabsTrigger value="ratios">Ratios</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="price" className="mt-6">
-            <PriceChart data={priceHistory} height={400} />
-          </TabsContent>
-
-          <TabsContent value="financials" className="mt-6">
-            <RevenueChart 
-              data={financials.map(f => ({
-                year: f.year,
-                revenue: f.revenue,
-                netIncome: f.netIncome,
-              }))} 
-              height={400} 
-            />
-          </TabsContent>
-
-          <TabsContent value="cashflow" className="mt-6">
-            <CashFlowChart 
-              data={financials.map(f => ({
-                year: f.year,
-                operatingCashFlow: f.operatingCashFlow,
-                freeCashFlow: f.freeCashFlow,
-              }))} 
-              height={400} 
-            />
-          </TabsContent>
-
-          <TabsContent value="ratios" className="mt-6">
-            {ratios && (
-              <RatiosChart
-                data={[
-                  { name: 'P/E Ratio', value: ratios.peRatio, benchmark: 22 },
-                  { name: 'P/B Ratio', value: ratios.pbRatio, benchmark: 4 },
-                  { name: 'ROE %', value: ratios.roe * 100, benchmark: 15 },
-                  { name: 'Net Margin %', value: ratios.netMargin * 100, benchmark: 12 },
-                  { name: 'Debt/Equity', value: ratios.debtToEquity, benchmark: 0.8 },
-                ]}
-                height={350}
-              />
-            )}
-          </TabsContent>
-        </Tabs>
-
-        {/* Key Metrics Grid */}
-        {ratios && (
+        {/* Key Metrics Grid - Real Data Only */}
+        <div>
+          <h3 className="text-lg font-semibold mb-4">Key Metrics</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
             <Card className="p-4">
+              <p className="text-xs text-muted-foreground">Market Cap</p>
+              <p className="text-xl font-bold font-mono mt-1">
+                {stock.marketCap > 0 ? formatMarketCap(stock.marketCap) : 'N/A'}
+              </p>
+            </Card>
+            <Card className="p-4">
               <p className="text-xs text-muted-foreground">P/E Ratio</p>
-              <p className="text-xl font-bold font-mono mt-1">{ratios.peRatio.toFixed(1)}</p>
+              <p className="text-xl font-bold font-mono mt-1">
+                {stock.peRatio > 0 ? stock.peRatio.toFixed(1) : 'N/A'}
+              </p>
             </Card>
             <Card className="p-4">
-              <p className="text-xs text-muted-foreground">P/B Ratio</p>
-              <p className="text-xl font-bold font-mono mt-1">{ratios.pbRatio.toFixed(2)}</p>
-            </Card>
-            <Card className="p-4">
-              <p className="text-xs text-muted-foreground">EV/EBITDA</p>
-              <p className="text-xl font-bold font-mono mt-1">{ratios.evToEbitda.toFixed(1)}</p>
+              <p className="text-xs text-muted-foreground">Dividend Yield</p>
+              <p className="text-xl font-bold font-mono mt-1">
+                {stock.dividendYield > 0 ? `${stock.dividendYield.toFixed(2)}%` : '0%'}
+              </p>
             </Card>
             <Card className="p-4">
               <p className="text-xs text-muted-foreground">ROE</p>
-              <p className="text-xl font-bold font-mono mt-1">{(ratios.roe * 100).toFixed(1)}%</p>
+              <p className="text-xl font-bold font-mono mt-1">
+                {stock.roe && stock.roe > 0 ? `${stock.roe.toFixed(1)}%` : 'N/A'}
+              </p>
             </Card>
             <Card className="p-4">
               <p className="text-xs text-muted-foreground">Net Margin</p>
-              <p className="text-xl font-bold font-mono mt-1">{(ratios.netMargin * 100).toFixed(1)}%</p>
+              <p className="text-xl font-bold font-mono mt-1">
+                {stock.netMargin && stock.netMargin > 0 ? `${stock.netMargin.toFixed(1)}%` : 'N/A'}
+              </p>
             </Card>
             <Card className="p-4">
-              <p className="text-xs text-muted-foreground">D/E Ratio</p>
-              <p className="text-xl font-bold font-mono mt-1">{ratios.debtToEquity.toFixed(2)}</p>
+              <p className="text-xs text-muted-foreground">Volume (10D Avg)</p>
+              <p className="text-xl font-bold font-mono mt-1">
+                {stock.volume > 0 ? `${(stock.volume / 1e6).toFixed(1)}M` : 'N/A'}
+              </p>
             </Card>
           </div>
+        </div>
+
+        {/* 52-Week Range Visual */}
+        {stock.fiftyTwoWeekLow > 0 && stock.fiftyTwoWeekHigh > 0 && (
+          <Card className="p-6">
+            <h3 className="text-lg font-semibold mb-4">52-Week Price Range</h3>
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Low: ${stock.fiftyTwoWeekLow.toFixed(2)}</span>
+                <span className="text-muted-foreground">High: ${stock.fiftyTwoWeekHigh.toFixed(2)}</span>
+              </div>
+              <div className="relative h-3 bg-secondary rounded-full overflow-hidden">
+                <div 
+                  className="absolute h-full bg-primary/30 rounded-full"
+                  style={{ width: '100%' }}
+                />
+                <div 
+                  className="absolute top-0 h-full w-1 bg-primary rounded-full transform -translate-x-1/2"
+                  style={{ 
+                    left: `${Math.min(100, Math.max(0, ((stock.price - stock.fiftyTwoWeekLow) / (stock.fiftyTwoWeekHigh - stock.fiftyTwoWeekLow)) * 100))}%` 
+                  }}
+                />
+              </div>
+              <p className="text-center text-sm text-muted-foreground">
+                Current: ${stock.price.toFixed(2)} ({((stock.price - stock.fiftyTwoWeekLow) / (stock.fiftyTwoWeekHigh - stock.fiftyTwoWeekLow) * 100).toFixed(0)}% of range)
+              </p>
+            </div>
+          </Card>
         )}
+
+        {/* Data Availability Notice */}
+        <Alert>
+          <Info className="h-4 w-4" />
+          <AlertDescription>
+            Stock data is fetched in real-time from market data providers. Historical charts and detailed financial statements 
+            require a premium data subscription and are not currently available.
+          </AlertDescription>
+        </Alert>
 
         {/* Related News */}
         {stockNews.length > 0 && (
