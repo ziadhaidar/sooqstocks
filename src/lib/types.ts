@@ -17,6 +17,14 @@ export interface Stock {
   industry: string;
   exchange: string;
   currency: string;
+  // Additional detailed metrics (from basic-financials API)
+  roe?: number;
+  netMargin?: number;
+  currentRatio?: number;
+  logo?: string;
+  weburl?: string;
+  ipo?: string;
+  sharesOutstanding?: number;
 }
 
 export interface FinancialStatement {

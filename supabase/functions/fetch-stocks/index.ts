@@ -15,6 +15,31 @@ interface FinnhubQuote {
   pc: number; // Previous close price
 }
 
+interface FinnhubProfile {
+  name: string;
+  finnhubIndustry: string;
+  marketCapitalization: number;
+  shareOutstanding: number;
+  logo: string;
+  weburl: string;
+  ipo: string;
+}
+
+interface FinnhubMetrics {
+  metric: {
+    peBasicExclExtraTTM?: number;
+    marketCapitalization?: number;
+    dividendYieldIndicatedAnnual?: number;
+    '52WeekHigh'?: number;
+    '52WeekLow'?: number;
+    '10DayAverageTradingVolume'?: number;
+    roeTTM?: number;
+    netProfitMarginTTM?: number;
+    currentRatioQuarterly?: number;
+    totalDebt?: number;
+  };
+}
+
 interface SymbolInfo {
   symbol: string;
   name: string;
@@ -45,8 +70,8 @@ function setCache(key: string, data: unknown): void {
 }
 
 // Rate limiting: Finnhub free tier = 60 calls/minute
-// With 60 stocks, 1 call each = 60 calls, just within limit
-const BATCH_SIZE = 5; // Process 5 symbols at a time
+// With company profile + basic-financials = 2 extra calls per symbol for detailed view
+const BATCH_SIZE = 5;
 const BATCH_DELAY = 1500; // 1.5 seconds between batches
 
 async function sleep(ms: number): Promise<void> {
@@ -83,13 +108,13 @@ async function fetchSymbolQuote(
   }
 
   try {
-    // Only fetch quote data (1 API call per stock)
+    // Fetch quote data
     const quoteRes = await fetchWithRetry(
       `https://finnhub.io/api/v1/quote?symbol=${symbolInfo.symbol}&token=${apiKey}`
     );
     const quote: FinnhubQuote = await quoteRes.json();
 
-    // Basic stock data from quote only
+    // Basic stock data from quote only (for list view)
     const stockData = {
       symbol: symbolInfo.symbol,
       name: symbolInfo.name,
@@ -102,8 +127,8 @@ async function fetchSymbolQuote(
       dividendYield: 0,
       fiftyTwoWeekHigh: quote.h || 0,
       fiftyTwoWeekLow: quote.l || 0,
-      movingAverage200: quote.pc || quote.c || 0, // Use prev close as proxy
-      sector: 'Technology', // Default sector
+      movingAverage200: quote.pc || quote.c || 0,
+      sector: 'Technology',
       industry: 'Unknown',
       exchange: symbolInfo.exchange,
       currency: symbolInfo.currency,
@@ -135,6 +160,72 @@ async function fetchSymbolQuote(
       currency: symbolInfo.currency,
       error: true,
     };
+  }
+}
+
+// Fetch detailed data for a single stock (profile + basic-financials)
+async function fetchDetailedStock(
+  symbolInfo: SymbolInfo,
+  apiKey: string
+): Promise<unknown> {
+  const cacheKey = `stock-detailed:${symbolInfo.symbol}`;
+  const cached = getCached(cacheKey);
+  if (cached) {
+    console.log(`Cache hit for detailed ${symbolInfo.symbol}`);
+    return cached;
+  }
+
+  try {
+    console.log(`Fetching detailed data for ${symbolInfo.symbol}`);
+    
+    // Fetch quote, profile, and basic-financials in parallel
+    const [quoteRes, profileRes, metricsRes] = await Promise.all([
+      fetchWithRetry(`https://finnhub.io/api/v1/quote?symbol=${symbolInfo.symbol}&token=${apiKey}`),
+      fetchWithRetry(`https://finnhub.io/api/v1/stock/profile2?symbol=${symbolInfo.symbol}&token=${apiKey}`),
+      fetchWithRetry(`https://finnhub.io/api/v1/stock/metric?symbol=${symbolInfo.symbol}&metric=all&token=${apiKey}`),
+    ]);
+
+    const quote: FinnhubQuote = await quoteRes.json();
+    const profile: FinnhubProfile = await profileRes.json();
+    const metricsData: FinnhubMetrics = await metricsRes.json();
+    const metrics = metricsData.metric || {};
+
+    const stockData = {
+      symbol: symbolInfo.symbol,
+      name: profile.name || symbolInfo.name,
+      price: quote.c || 0,
+      change: quote.d || 0,
+      changePercent: quote.dp || 0,
+      volume: metrics['10DayAverageTradingVolume'] ? Math.round(metrics['10DayAverageTradingVolume'] * 1000000) : 0,
+      marketCap: (metrics.marketCapitalization || profile.marketCapitalization || 0) * 1000000, // Convert to actual value
+      peRatio: metrics.peBasicExclExtraTTM || 0,
+      dividendYield: metrics.dividendYieldIndicatedAnnual || 0,
+      fiftyTwoWeekHigh: metrics['52WeekHigh'] || quote.h || 0,
+      fiftyTwoWeekLow: metrics['52WeekLow'] || quote.l || 0,
+      movingAverage200: quote.pc || quote.c || 0,
+      sector: profile.finnhubIndustry || 'Unknown',
+      industry: profile.finnhubIndustry || 'Unknown',
+      exchange: symbolInfo.exchange,
+      currency: symbolInfo.currency,
+      // Additional metrics for detailed view
+      roe: metrics.roeTTM || 0,
+      netMargin: metrics.netProfitMarginTTM || 0,
+      currentRatio: metrics.currentRatioQuarterly || 0,
+      logo: profile.logo || '',
+      weburl: profile.weburl || '',
+      ipo: profile.ipo || '',
+      sharesOutstanding: profile.shareOutstanding || 0,
+    };
+
+    if (quote.c && quote.c > 0) {
+      setCache(cacheKey, stockData);
+    }
+    
+    return stockData;
+  } catch (error) {
+    console.error(`Error fetching detailed ${symbolInfo.symbol}:`, error);
+    // Fallback to basic quote
+    return fetchSymbolQuote(symbolInfo, apiKey);
   }
 }
 
@@ -177,7 +268,7 @@ serve(async (req) => {
       throw new Error('API key not configured');
     }
 
-    const { symbols, search } = await req.json();
+    const { symbols, search, detailed } = await req.json();
     
     // Handle symbol search
     if (search) {
@@ -201,6 +292,15 @@ serve(async (req) => {
         }));
       
       return new Response(JSON.stringify({ results }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Handle detailed single stock fetch
+    if (detailed && symbols && symbols.length === 1) {
+      console.log(`Fetching detailed data for ${symbols[0].symbol}`);
+      const stockData = await fetchDetailedStock(symbols[0], apiKey);
+      return new Response(JSON.stringify({ stocks: [stockData] }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
