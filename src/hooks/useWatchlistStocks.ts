@@ -29,7 +29,8 @@ async function fetchWatchlistStocks(): Promise<Stock[]> {
     throw error;
   }
 
-  return data || [];
+  // API returns { stocks: [...] }, extract the array
+  return data?.stocks || [];
 }
 
 export function useWatchlistStocks() {
