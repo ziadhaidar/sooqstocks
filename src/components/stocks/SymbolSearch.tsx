@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Search, Plus, Loader2, ExternalLink } from 'lucide-react';
+import { Search, Plus, Loader2, Heart } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { useSymbolSearch, useFetchStock } from '@/hooks/useStocks';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
+import { addToWatchlist, getWatchlists } from '@/lib/storage';
 
 export function SymbolSearch() {
   const [inputValue, setInputValue] = useState('');
@@ -34,6 +35,20 @@ export function SymbolSearch() {
       navigate(`/stock/${result.symbol}`);
     } catch (error) {
       toast.error(`Failed to fetch ${result.symbol}`);
+    }
+  };
+
+  const handleAddToWatchlist = (result: { symbol: string; name: string }) => {
+    const watchlists = getWatchlists();
+    const defaultWatchlist = watchlists[0];
+    if (defaultWatchlist) {
+      const exists = defaultWatchlist.items.some(item => item.symbol === result.symbol);
+      if (exists) {
+        toast.info(`${result.symbol} is already in your watchlist`);
+      } else {
+        addToWatchlist(defaultWatchlist.id, result.symbol, result.name);
+        toast.success(`${result.symbol} added to watchlist`);
+      }
     }
   };
 
@@ -81,15 +96,24 @@ export function SymbolSearch() {
                     <Button
                       size="sm"
                       variant="ghost"
+                      onClick={() => handleAddToWatchlist(result)}
+                      title="Add to Watchlist"
+                    >
+                      <Heart className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
                       onClick={() => handleAddStock(result)}
                       disabled={fetchStock.isPending}
+                      title="Run DCF Analysis"
                     >
                       {fetchStock.isPending ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
                         <>
                           <Plus className="h-4 w-4 mr-1" />
-                          Add
+                          DCF
                         </>
                       )}
                     </Button>
