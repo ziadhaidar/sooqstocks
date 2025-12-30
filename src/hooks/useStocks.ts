@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { ALL_SYMBOLS, US_SYMBOLS, EU_SYMBOLS, SymbolInfo } from '@/lib/symbols';
 import { Stock } from '@/lib/types';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 
 async function fetchStocks(): Promise<Stock[]> {
   const { data, error } = await supabase.functions.invoke('fetch-stocks', {
@@ -120,17 +120,32 @@ async function searchSymbols(query: string): Promise<SearchResult[]> {
 
 export function useSymbolSearch() {
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  
+  // Debounce the search query to avoid rate limiting
+  const debounceRef = useRef<NodeJS.Timeout | null>(null);
   
   const query = useQuery({
-    queryKey: ['symbolSearch', searchQuery],
-    queryFn: () => searchSymbols(searchQuery),
-    enabled: searchQuery.length >= 1,
-    staleTime: 5 * 60 * 1000, // 5 minutes
-    gcTime: 30 * 60 * 1000, // 30 minutes cache
+    queryKey: ['symbolSearch', debouncedQuery],
+    queryFn: () => searchSymbols(debouncedQuery),
+    enabled: debouncedQuery.length >= 2, // Require at least 2 characters
+    staleTime: 10 * 60 * 1000, // 10 minutes - longer cache
+    gcTime: 60 * 60 * 1000, // 1 hour cache
+    retry: 1, // Reduce retries to avoid hammering the API
   });
 
   const search = useCallback((query: string) => {
     setSearchQuery(query);
+    
+    // Clear existing timeout
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+    }
+    
+    // Debounce: wait 500ms after user stops typing
+    debounceRef.current = setTimeout(() => {
+      setDebouncedQuery(query);
+    }, 500);
   }, []);
 
   return {
